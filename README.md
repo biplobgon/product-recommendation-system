@@ -94,3 +94,78 @@ End-to-end **Product Recommendation System** built using real-world e-commerce i
 ---
 
 ## 📁 Project Structure
+
+```
+product-recommendation-system/
+│
+├── data/
+│ ├── raw/
+│ └── processed/
+│
+├── src/
+│ ├── data_prep.py
+│ ├── feature_engineering.py
+│ ├── train_model.py
+│ ├── recommend.py
+│ ├── evaluate.py
+│ │
+│ └── app/
+│ ├── api.py
+│ └── dashboard.py
+│
+├── outputs/
+│ ├── model/
+│ ├── plots/
+│
+├── assets/
+│ ├── system_architecture.png
+│ └── xgb_model.pkl
+│
+├── notebooks/
+├── presentation/
+│
+├── README.md
+├── requirements.txt
+└── .gitignore
+```
+```markdown id="tip"
+👉 Modular structure designed for scalability and easy transition to production environments
+```
+---
+
+## 📈 Evaluation Metrics
+
+### Offline Metrics:
+- Precision@K  
+- Recall@K  
+- NDCG  
+
+### Business Metrics:
+- CTR uplift  
+- Conversion rate  
+- Revenue per user  
+
+---
+
+## 🔌 API (FastAPI)
+
+### ▶️ Run API
+
+```bash
+uvicorn src.app.api:app --reload
+```
+---
+
+## 📥 Endpoint
+
+### GET /recommend/{user_id}
+
+```json
+{
+  "user_id": 123,
+  "recommended_items": [101, 205, 876]
+}
+```
+
+
+
