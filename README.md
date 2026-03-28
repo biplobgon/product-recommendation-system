@@ -166,6 +166,49 @@ uvicorn src.app.api:app --reload
   "recommended_items": [101, 205, 876]
 }
 ```
+---
 
+## 📊 Streamlit Dashboard
+
+### ▶️ Run Dashboard
+
+```bash
+streamlit run src/app/dashboard.py
+```
+
+### Features:
+
+- 🔮 Personalized recommendations
+- 📊 Top-N products
+- 📈 Interactive visualization
+
+---
+
+## 📊 Key Insights
+
+- Users with similar behavior patterns purchase similar products
+- Item similarity significantly improves recommendation accuracy
+- Hybrid models outperform standalone approaches
+- Cold-start handled via content-based signals
+
+---
+
+## ⚙️ How to Run End-to-End
+
+```bash
+pip install -r requirements.txt
+
+python src/data_prep.py
+python src/feature_engineering.py
+python src/train_model.py
+python src/evaluate.py
+
+uvicorn src/app/api.py --reload
+streamlit run src/app/dashboard.py
+```
+
+---
+
+## 🔄 CI/CD (GitHub Actions)
 
 
