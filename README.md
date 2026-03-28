@@ -230,10 +230,11 @@ Automated pipeline includes:
 
 ## 👤 Author
 
-### Biplob Gon
---Data Scientist | AI/ML | Recommender Systems
-🔗 [https://github.com/biplobgon](https://github.com/biplobgon)
-🔗 [https://linkedin.com/in/biplobgon](https://www.linkedin.com/in/biplobgon/)
+**Biplob Gon**  
+_Data Scientist | AI/ML | Recommender Systems_
+
+[![GitHub](https://img.shields.io/badge/GitHub-biplobgon-black?logo=github)](https://github.com/biplobgon)  
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-Biplob%20Gon-blue?logo=linkedin)](https://linkedin.com/in/biplobgon)
 
 ---
 
