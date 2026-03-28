@@ -210,5 +210,32 @@ streamlit run src/app/dashboard.py
 ---
 
 ## 🔄 CI/CD (GitHub Actions)
+Automated pipeline includes:
 
+- Data preprocessing
+- Model training
+- Evaluation
+- Artifact generation
 
+---
+## 🧩 Future Enhancements
+
+- Real-time streaming recommendations (Kafka)
+- Deep Learning (Neural CF, Transformers)
+- Graph-based recommendations (GNN)
+- A/B testing framework
+- Reinforcement learning for dynamic recommendations
+
+---
+
+## 👤 Author
+
+### Biplob Gon
+--Data Scientist | AI/ML | Recommender Systems
+🔗 [https://github.com/biplobgon](https://github.com/biplobgon)
+🔗 [https://linkedin.com/in/biplobgon](https://www.linkedin.com/in/biplobgon/)
+
+---
+
+## ⭐ If you found this useful
+Give this repo a ⭐ to support and share!
