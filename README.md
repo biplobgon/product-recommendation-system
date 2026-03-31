@@ -193,11 +193,66 @@ streamlit run src/app/dashboard.py
 
 ---
 
+## ☁️ Google Cloud Storage Setup
+
+Raw dataset files are stored in a GCS bucket and downloaded automatically the first time you run the pipeline.
+
+### Prerequisites
+
+1. **Install the GCS dependency** (included in `requirements.txt`):
+   ```bash
+   pip install google-cloud-storage==2.10.0
+   ```
+
+2. **Authenticate** using one of the following methods:
+   - *Application Default Credentials* (recommended for local development):
+     ```bash
+     gcloud auth application-default login
+     ```
+   - *Service-account key file*: Download a JSON key from the GCP console and set:
+     ```bash
+     export GCS_CREDENTIALS=/path/to/service-account-key.json
+     ```
+
+3. **Configure environment variables** – copy `.env.example` to `.env` and edit as needed:
+   ```bash
+   cp .env.example .env
+   # Edit .env and set GCS_BUCKET_NAME (and optionally GCS_PROJECT_ID / GCS_CREDENTIALS)
+   ```
+
+### Download data manually
+
+```bash
+# Download all default dataset files into data/raw/
+python src/gcs_loader.py
+
+# Download specific files
+python src/gcs_loader.py --files events.csv category_tree.csv
+
+# Override bucket and destination
+python src/gcs_loader.py --bucket my-bucket --dest /tmp/data
+```
+
+### Files expected in the bucket
+
+| Blob name | Description |
+|---|---|
+| `events.csv` | User interaction events (clicks, add-to-cart, purchases) |
+| `category_tree.csv` | Product category hierarchy |
+| `item_properties_part1.csv` | Item metadata (part 1) |
+| `item_properties_part2.csv` | Item metadata (part 2) |
+
+---
+
 ## ⚙️ How to Run End-to-End
 
 ```bash
 pip install -r requirements.txt
 
+# Configure GCS (see ☁️ Google Cloud Storage Setup above)
+cp .env.example .env  # then edit .env
+
+# data_prep.py auto-downloads from GCS if data/raw/events.csv is missing
 python src/data_prep.py
 python src/feature_engineering.py
 python src/train_model.py
