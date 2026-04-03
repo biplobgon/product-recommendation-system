@@ -1,0 +1,2 @@
+# Trained model artifacts are saved here by the training pipeline.
+# Files in this directory are excluded from version control (see .gitignore).

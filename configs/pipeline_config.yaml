@@ -1,0 +1,72 @@
+# =============================================================================
+# pipeline_config.yaml
+# Orchestration settings for training and inference pipelines.
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# Training pipeline
+# ---------------------------------------------------------------------------
+training:
+  # Steps to run (order matters)
+  steps:
+    - data_validation
+    - feature_engineering
+    - train_collaborative_filtering
+    - train_content_based
+    - train_session_based
+    - train_conversion_ranker
+    - evaluate_all
+    - export_artifacts
+
+  # Save a checkpoint after every N epochs (session-based model)
+  checkpoint_every_n_epochs: 5
+
+  # Re-use cached processed features if they exist
+  use_feature_cache: true
+  feature_cache_dir: data/processed/feature_cache
+
+# ---------------------------------------------------------------------------
+# Inference pipeline
+# ---------------------------------------------------------------------------
+inference:
+  # Maximum latency budget per request (ms)
+  latency_budget_ms: 100
+
+  # Candidate generation: retrieve top-k candidates before re-ranking
+  candidate_pool_size: 200
+
+  # Re-ranking with conversion ranker
+  rerank: true
+
+  # Serve via REST API
+  api:
+    host: 0.0.0.0
+    port: 8000
+    workers: 4
+    reload: false
+
+# ---------------------------------------------------------------------------
+# Data validation thresholds
+# ---------------------------------------------------------------------------
+data_validation:
+  min_events: 500000
+  min_items: 50000
+  min_categories: 100
+  max_missing_pct: 10.0
+
+# ---------------------------------------------------------------------------
+# Experiment tracking (MLflow)
+# ---------------------------------------------------------------------------
+mlflow:
+  enabled: true
+  tracking_uri: mlruns
+  experiment_name: product-recommendation-system
+
+# ---------------------------------------------------------------------------
+# Scheduling (for production re-training)
+# ---------------------------------------------------------------------------
+schedule:
+  # Cron expression: retrain at 02:00 every Sunday
+  retrain_cron: "0 2 * * 0"
+  # Minimum improvement in NDCG@10 required to deploy a new model
+  min_improvement_threshold: 0.005

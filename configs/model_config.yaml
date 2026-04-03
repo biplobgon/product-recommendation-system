@@ -1,0 +1,128 @@
+# =============================================================================
+# model_config.yaml
+# Configuration for all recommendation models in the pipeline.
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# Global
+# ---------------------------------------------------------------------------
+seed: 42
+log_level: INFO
+
+# ---------------------------------------------------------------------------
+# Data paths (relative to project root)
+# ---------------------------------------------------------------------------
+data:
+  raw_dir: data/raw
+  processed_dir: data/processed
+  category_tree: data/raw/category_tree.csv
+  events: data/raw/events.csv
+  item_props_part1: data/raw/item_properties_part1.csv
+  item_props_part2: data/raw/item_properties_part2.csv
+
+# ---------------------------------------------------------------------------
+# Feature engineering
+# ---------------------------------------------------------------------------
+features:
+  # Minimum interactions before a user is included in CF training
+  min_user_interactions: 2
+  # Interaction weights for implicit feedback (view < addtocart < transaction)
+  event_weights:
+    view: 1
+    addtocart: 5
+    transaction: 10
+  # Number of days to use as session boundary (inactivity gap)
+  session_boundary_hours: 1
+  # Item property embeddings
+  item_embedding_dim: 64
+
+# ---------------------------------------------------------------------------
+# Collaborative Filtering — Implicit ALS
+# ---------------------------------------------------------------------------
+collaborative_filtering:
+  model: als
+  factors: 128
+  regularization: 0.01
+  iterations: 20
+  alpha: 40           # confidence scaling: c_ui = 1 + alpha * r_ui
+  use_gpu: false
+
+# ---------------------------------------------------------------------------
+# Content-Based Filtering
+# ---------------------------------------------------------------------------
+content_based:
+  similarity_metric: cosine   # cosine | euclidean
+  top_k_similar_items: 50
+  tfidf_max_features: 5000
+
+# ---------------------------------------------------------------------------
+# Session-Based Recommender (GRU4Rec)
+# ---------------------------------------------------------------------------
+session_based:
+  model: gru4rec
+  embedding_dim: 64
+  hidden_size: 128
+  num_layers: 1
+  dropout: 0.2
+  batch_size: 256
+  epochs: 20
+  learning_rate: 0.001
+  max_session_length: 20
+  loss: bpr             # bpr | cross_entropy | top1
+
+# ---------------------------------------------------------------------------
+# Conversion Ranker (LightGBM)
+# ---------------------------------------------------------------------------
+conversion_ranker:
+  model: lightgbm
+  num_leaves: 63
+  n_estimators: 500
+  learning_rate: 0.05
+  feature_fraction: 0.8
+  bagging_fraction: 0.8
+  bagging_freq: 5
+  min_child_samples: 20
+  objective: binary
+  metric: auc
+  early_stopping_rounds: 50
+
+# ---------------------------------------------------------------------------
+# Hybrid Ensemble
+# ---------------------------------------------------------------------------
+hybrid:
+  # Weight blend for final score: score = w_cf*cf + w_cb*cb + w_sb*sb
+  weights:
+    collaborative_filtering: 0.35
+    content_based: 0.25
+    session_based: 0.40
+  # Fallback order when a model cannot score an item
+  fallback_order:
+    - session_based
+    - content_based
+    - collaborative_filtering
+  top_k_recommendations: 10
+
+# ---------------------------------------------------------------------------
+# Evaluation
+# ---------------------------------------------------------------------------
+evaluation:
+  test_split_ratio: 0.2
+  val_split_ratio: 0.1
+  # Leave-last-out split for sequential models
+  split_strategy: temporal
+  metrics:
+    - hit_rate@10
+    - ndcg@10
+    - mrr@10
+    - precision@5
+    - recall@10
+    - coverage
+    - novelty
+
+# ---------------------------------------------------------------------------
+# Output paths
+# ---------------------------------------------------------------------------
+outputs:
+  models_dir: outputs/models
+  figures_dir: outputs/figures
+  reports_dir: outputs/reports
