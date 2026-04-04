@@ -19,6 +19,19 @@ license: mit
 ![Events](https://img.shields.io/badge/Events-2.75M-yellow)
 ![Models](https://img.shields.io/badge/Models-4_Hybrid_Stack-blueviolet)
 
+---
+
+## 🚀 Try the Live App
+
+<div align="center">
+
+### [![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://recomsys.streamlit.app/)
+
+**[https://recomsys.streamlit.app/](https://recomsys.streamlit.app/)**
+
+*Get real-time product recommendations · Compare 4 ML models · Explore the dataset*
+
+</div>
 
 ---
 
@@ -26,15 +39,15 @@ license: mit
     PART 1 — PRODUCT LINKS
 ╚══════════════════════════════════════════════════════════════-->
 
-## 🔗 Live Demos
+## 🔗 Product Links
 
 | Surface | Link | Notes |
 |---|---|---|
-| **Streamlit Dashboard** | [http://localhost:8501](http://localhost:8501) | Interactive UI — get personalised recommendations, explore model metrics & data |
+| 🌐 **Live Streamlit App** | [recomsys.streamlit.app](https://recomsys.streamlit.app/) | **Deployed** — interactive recommendations, model metrics & data explorer |
 | **FastAPI Service** | [http://localhost:8000](http://localhost:8000) | REST endpoints — `/recommend/{visitor_id}`, `/similar/{item_id}`, `/popular` |
 | **FastAPI Docs (Swagger)** | [http://localhost:8000/docs](http://localhost:8000/docs) | Auto-generated OpenAPI spec |
 
-> **Run locally in two commands:**
+> **Run locally:**
 > ```bash
 > uvicorn src.app.api:app --host 0.0.0.0 --port 8000 --reload
 > streamlit run src/app/dashboard.py --server.port 8501
