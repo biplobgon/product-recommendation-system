@@ -33,12 +33,13 @@
 ## 🔗 Product Links
 
 | Surface | Link | Notes |
-|---|---|---|
+|---|------|-------|
 | 🌐 **Live Streamlit App** | [recomsys.streamlit.app](https://recomsys.streamlit.app/) | **Deployed on Streamlit Community Cloud** — recommendations, metrics & data explorer |
 | 🤗 **Model Repository** | [biplobgon/product-recommendation-data](https://huggingface.co/datasets/biplobgon/product-recommendation-data) | HF Hub dataset repo hosting 4 model PKLs + processed data (~830 MB) |
 | 🐳 **HF Docker Space** | [biplobgon/product-recommendation-system](https://huggingface.co/spaces/biplobgon/product-recommendation-system) | Alternate deployment via Docker on HF Spaces |
-| **FastAPI Service** | [http://localhost:8000](http://localhost:8000) | Local REST endpoints — `/recommend/{visitor_id}`, `/similar/{item_id}`, `/popular` |
-| **FastAPI Docs (Swagger)** | [http://localhost:8000/docs](http://localhost:8000/docs) | Auto-generated OpenAPI spec |
+| ⚡ **FastAPI Landing Page** | [http://localhost:8000](http://localhost:8000) | Branded dark-theme landing page — model cards, stat counters, endpoint showcase |
+| 📖 **FastAPI Swagger UI** | [http://localhost:8000/docs](http://localhost:8000/docs) | Interactive API explorer — try live requests directly in the browser |
+| 📄 **FastAPI ReDoc** | [http://localhost:8000/redoc](http://localhost:8000/redoc) | Clean reference documentation for all endpoints |
 
 > **Run locally:**
 > ```bash
@@ -213,24 +214,46 @@ python src/training/run_evaluation.py
 uvicorn src.app.api:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-| Method | Endpoint | Description |
+The API ships with a **branded landing page** at `/` and full interactive docs at `/docs` and `/redoc`.
+
+| Method | Endpoint | Tag | Description |
+|---|---|---|---|
+| `GET` | `/` | — | Branded HTML landing page with stat counters, model cards & endpoint list |
+| `GET` | `/health` | System | Liveness probe — loaded model map, dataset stats & project links |
+| `GET` | `/models` | Model Info | Full model registry — descriptions, load status & offline metrics @ K=10 |
+| `GET` | `/metrics` | Model Info | Complete `evaluation_report.csv` as JSON (Hit Rate, NDCG, MRR, Coverage, Novelty) |
+| `GET` | `/recommend/{visitor_id}` | Recommend | Personalised top-K — selectable model via `model=` param |
+| `POST` | `/recommend/session` | Recommend | Session-only recommendations — works for anonymous visitors |
+| `GET` | `/similar/{item_id}` | Discover | Items similar to a given item (TF-IDF content-based) |
+| `GET` | `/popular` | Discover | Globally trending items ranked by weighted interaction score |
+| `GET` | `/docs` | — | Swagger UI — interactive API explorer with Try It Out enabled |
+| `GET` | `/redoc` | — | ReDoc — clean reference documentation |
+
+**`model=` parameter** (available on `/recommend/{visitor_id}` and `/recommend/session`):
+
+| Value | Model | Best for |
 |---|---|---|
-| `GET` | `/health` | Service health + loaded models |
-| `GET` | `/recommend/{visitor_id}` | Personalised top-K (all models) |
-| `POST` | `/recommend/session` | Session-only recommendations (no history needed) |
-| `GET` | `/similar/{item_id}` | Items similar to a given item (TF-IDF) |
-| `GET` | `/popular` | Global popularity fallback |
+| `hybrid` *(default)* | Weighted blend of all three | All users |
+| `als` | ALS Collaborative Filtering | Returning visitors (≥ 2 events) |
+| `content_based` | TF-IDF metadata similarity | Cold-start items |
+| `session_based` | Item-KNN co-occurrence | Anonymous visitors |
 
 **Example**:
 ```bash
-curl "http://localhost:8000/recommend/12345?session_items=101,202&top_k=10"
+curl "http://localhost:8000/recommend/1287309?session_items=461686,119736&top_k=5&model=hybrid"
 ```
 ```json
 {
-  "visitor_id": 12345,
-  "recommended_items": [876, 205, 934, 412, 778, 66, 543, 188, 301, 407],
-  "model": "hybrid",
-  "latency_ms": 38
+  "visitor_id": 1287309,
+  "model_used": "hybrid",
+  "total_returned": 5,
+  "recommendations": [
+    {"rank": 1, "item_id": 461686, "score": 0.923, "category_id": "1016", "category_depth": 2, "price": "3.50",  "available": "Yes"},
+    {"rank": 2, "item_id": 119736, "score": 0.871, "category_id": "213",  "category_depth": 1, "price": "12.00", "available": "Yes"},
+    {"rank": 3, "item_id": 312728, "score": 0.754, "category_id": "1016", "category_depth": 2, "price": null,    "available": "No"},
+    {"rank": 4, "item_id": 58493,  "score": 0.701, "category_id": "889",  "category_depth": 2, "price": "7.20",  "available": "Yes"},
+    {"rank": 5, "item_id": 204311, "score": 0.688, "category_id": "213",  "category_depth": 1, "price": "21.99", "available": "Yes"}
+  ]
 }
 ```
 
@@ -286,7 +309,7 @@ product-recommendation-system/
 │   │   └── evaluate.py                 # HR@K, NDCG@K, MRR@K, Coverage, Novelty
 │   │
 │   └── app/
-│       ├── api.py                      # FastAPI service (5 endpoints)
+│       ├── api.py                      # FastAPI service (v2.0 — landing page + 8 endpoints)
 │       ├── dashboard.py                # Streamlit dashboard (3 tabs)
 │       └── hf_loader.py                # Downloads model/data artefacts from HF Hub
 │
