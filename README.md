@@ -3,9 +3,8 @@ title: Product Recommendation System
 emoji: 🛍️
 colorFrom: blue
 colorTo: purple
-sdk: streamlit
-sdk_version: "1.32.0"
-app_file: app.py
+sdk: docker
+app_port: 7860
 pinned: true
 license: mit
 ---
