@@ -1,14 +1,39 @@
-﻿# 🛍️ Product Recommendation System (End-to-End ML + MLOps)
+﻿# 🛍️ Product Recommendation System
 
 ![Python](https://img.shields.io/badge/Python-3.14-blue)
 ![Recommender](https://img.shields.io/badge/System-Hybrid_Recommendation-green)
-![MLOps](https://img.shields.io/badge/MLOps-GitHub_Actions-orange)
-![FastAPI](https://img.shields.io/badge/API-FastAPI-teal)
-![Streamlit](https://img.shields.io/badge/Dashboard-Streamlit-red)
+![FastAPI](https://img.shields.io/badge/API-FastAPI-009688?logo=fastapi)
+![Streamlit](https://img.shields.io/badge/Dashboard-Streamlit-FF4B4B?logo=streamlit)
 ![Dataset](https://img.shields.io/badge/Dataset-RetailRocket-lightgrey)
 ![Events](https://img.shields.io/badge/Events-2.75M-yellow)
+![Models](https://img.shields.io/badge/Models-4_Hybrid_Stack-blueviolet)
+
 
 ---
+
+<!--═══════════════════════════════════════════════════════════╗
+    PART 1 — PRODUCT LINKS
+╚══════════════════════════════════════════════════════════════-->
+
+## 🔗 Live Demos
+
+| Surface | Link | Notes |
+|---|---|---|
+| **Streamlit Dashboard** | [http://localhost:8501](http://localhost:8501) | Interactive UI — get personalised recommendations, explore model metrics & data |
+| **FastAPI Service** | [http://localhost:8000](http://localhost:8000) | REST endpoints — `/recommend/{visitor_id}`, `/similar/{item_id}`, `/popular` |
+| **FastAPI Docs (Swagger)** | [http://localhost:8000/docs](http://localhost:8000/docs) | Auto-generated OpenAPI spec |
+
+> **Run locally in two commands:**
+> ```bash
+> uvicorn src.app.api:app --host 0.0.0.0 --port 8000 --reload
+> streamlit run src/app/dashboard.py --server.port 8501
+> ```
+
+---
+
+<!--═══════════════════════════════════════════════════════════╗
+    PART 2 — EXECUTIVE SUMMARY
+╚══════════════════════════════════════════════════════════════-->
 
 ## 📌 Overview
 
