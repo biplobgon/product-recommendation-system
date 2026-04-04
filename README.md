@@ -1,15 +1,4 @@
-﻿---
-title: Product Recommendation System
-emoji: 🛍️
-colorFrom: blue
-colorTo: purple
-sdk: docker
-app_port: 7860
-pinned: true
-license: mit
----
-
-# 🛍️ Product Recommendation System
+﻿# 🛍️ Product Recommendation System
 
 ![Python](https://img.shields.io/badge/Python-3.14-blue)
 ![Recommender](https://img.shields.io/badge/System-Hybrid_Recommendation-green)
