@@ -87,29 +87,38 @@ def build_session_sequences(
     """
     logger.info("Building session sequences (max_len=%d, min_len=%d) …", max_len, min_len)
 
-    grp = sessions_df.groupby("session_id")
+    df = sessions_df.sort_values(["session_id", "session_pos"])
+
+    # Fast vectorised approach: build item-list per session using numpy split
+    grp_keys = df["session_id"].values
+    item_vals = df["itemid"].values
+    visitor_vals = df["visitorid"].values
+    event_vals = df["event"].values
+
+    # Find split indices where session_id changes
+    change_mask = np.concatenate(([True], grp_keys[1:] != grp_keys[:-1]))
+    split_idx = np.where(change_mask)[0]
+
+    session_ids  = grp_keys[split_idx]
+    visitor_ids  = visitor_vals[split_idx]
+    item_groups  = np.split(item_vals, split_idx[1:])
+    event_groups = np.split(event_vals, split_idx[1:])
 
     records = []
-    for sid, group in grp:
-        group = group.sort_values("session_pos")
-        items = group["itemid"].tolist()
+    for sid, vid, items, events in zip(session_ids, visitor_ids, item_groups, event_groups):
         if len(items) < min_len:
             continue
-
-        target = items[-1]
-        input_items = items[:-1][-max_len:]          # all but last, capped
-        padded = [0] * (max_len - len(input_items)) + input_items
-
-        records.append(
-            {
-                "session_id": sid,
-                "visitorid": group["visitorid"].iloc[0],
-                "item_sequence": padded,
-                "target_item": target,
-                "session_length": len(items),
-                "has_purchase": (group["event"] == "transaction").any(),
-            }
-        )
+        target = int(items[-1])
+        inp = items[:-1][-max_len:].tolist()
+        padded = [0] * (max_len - len(inp)) + inp
+        records.append({
+            "session_id":     sid,
+            "visitorid":      int(vid),
+            "item_sequence":  padded,
+            "target_item":    target,
+            "session_length": len(items),
+            "has_purchase":   bool((events == "transaction").any()),
+        })
 
     result = pd.DataFrame(records)
     logger.info("Session sequences built: %d training samples.", len(result))

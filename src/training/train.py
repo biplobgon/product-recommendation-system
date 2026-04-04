@@ -62,13 +62,17 @@ def run_training_pipeline(config_path: str | Path | None = None) -> HybridRecomm
     logger.info("Loading raw data …")
     events = pd.read_csv(project_root / cfg.data.events)
     category_tree = pd.read_csv(project_root / cfg.data.category_tree)
-    item_props = pd.concat(
-        [
-            pd.read_csv(project_root / cfg.data.item_props_part1),
-            pd.read_csv(project_root / cfg.data.item_props_part2),
-        ],
-        ignore_index=True,
-    )
+    _TARGET_PROPS = {"categoryid", "790", "available"}
+    _prop_chunks = []
+    for _path in [cfg.data.item_props_part1, cfg.data.item_props_part2]:
+        for _chunk in pd.read_csv(
+            project_root / _path,
+            chunksize=500_000,
+            dtype=str,
+        ):
+            _chunk = _chunk[_chunk["property"].isin(_TARGET_PROPS)]
+            _prop_chunks.append(_chunk)
+    item_props = pd.concat(_prop_chunks, ignore_index=True)
     logger.info(
         "Loaded: %d events, %d item-property records.", len(events), len(item_props)
     )
@@ -80,7 +84,7 @@ def run_training_pipeline(config_path: str | Path | None = None) -> HybridRecomm
     interactions = build_user_item_matrix(events)
     item_features = build_item_features(item_props, category_tree)
     item_ids, tfidf_matrix, vectorizer = build_item_tfidf_matrix(
-        item_props, max_features=cfg.features.item_embedding_dim * 50
+        item_props, max_features=min(cfg.features.item_embedding_dim * 10, 500)
     )
 
     sessions_df = build_sessions(
@@ -99,31 +103,34 @@ def run_training_pipeline(config_path: str | Path | None = None) -> HybridRecomm
     train_events = events[events["datetime"] <= cutoff]
     train_interactions = build_user_item_matrix(train_events)
 
-    train_mask = sequences["session_id"].map(
-        lambda sid: sessions_df.loc[
-            sessions_df["session_id"] == sid, "datetime"
-        ].min() <= cutoff
-        if (sessions_df["session_id"] == sid).any()
-        else True
+    # Build a lookup: session_id → min datetime — O(n) not O(n²)
+    session_min_dt = (
+        sessions_df.groupby("session_id")["datetime"].min()
     )
-    train_sequences = sequences[train_mask.fillna(True)]
+    train_sequences = sequences[
+        sequences["session_id"].map(session_min_dt).fillna(cutoff) <= cutoff
+    ]
 
     # ------------------------------------------------------------------
     # 4a. Collaborative Filtering
     # ------------------------------------------------------------------
     logger.info("Training ALS Collaborative Filtering model …")
+    _min_inter = getattr(cfg.collaborative_filtering, "min_interactions", 5)
+    _user_counts = train_interactions.groupby("visitorid")["score"].count()
+    _active = _user_counts[_user_counts >= _min_inter].index
+    als_interactions = train_interactions[train_interactions["visitorid"].isin(_active)]
+    logger.info(
+        "ALS training on %d users with ≥%d interactions (%d total interactions).",
+        len(_active), _min_inter, len(als_interactions),
+    )
     als = ALSRecommender(
         factors=cfg.collaborative_filtering.factors,
         regularization=cfg.collaborative_filtering.regularization,
         iterations=cfg.collaborative_filtering.iterations,
         alpha=cfg.collaborative_filtering.alpha,
     )
-    try:
-        als.fit(train_interactions)
-        als.save(models_dir / "als_model.pkl")
-    except ImportError:
-        logger.warning("implicit not installed — ALS model skipped.")
-        als = None
+    als.fit(als_interactions)
+    als.save(models_dir / "als_model.pkl")
 
     # ------------------------------------------------------------------
     # 4b. Content-Based
@@ -136,25 +143,17 @@ def run_training_pipeline(config_path: str | Path | None = None) -> HybridRecomm
     # ------------------------------------------------------------------
     # 4c. Session-Based (GRU4Rec)
     # ------------------------------------------------------------------
-    logger.info("Training Session-Based (GRU4Rec) model …")
+    logger.info("Training Session-Based (Item-KNN co-occurrence) model …")
     sb = SessionBasedRecommender(
-        emb_dim=cfg.session_based.embedding_dim,
-        hidden_size=cfg.session_based.hidden_size,
-        num_layers=cfg.session_based.num_layers,
-        dropout=cfg.session_based.dropout,
         max_session_length=cfg.session_based.max_session_length,
     )
-    try:
-        sb.fit(
-            train_sequences,
-            epochs=cfg.session_based.epochs,
-            batch_size=cfg.session_based.batch_size,
-            lr=cfg.session_based.learning_rate,
-        )
-        sb.save(models_dir / "session_based_model.pkl")
-    except ImportError:
-        logger.warning("torch not installed — GRU4Rec model skipped.")
-        sb = None
+    sb.fit(
+        train_sequences,
+        epochs=cfg.session_based.epochs,
+        batch_size=cfg.session_based.batch_size,
+        lr=cfg.session_based.learning_rate,
+    )
+    sb.save(models_dir / "session_based_model.pkl")
 
     # ------------------------------------------------------------------
     # 5. Assemble Hybrid

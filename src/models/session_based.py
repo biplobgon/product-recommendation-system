@@ -1,28 +1,29 @@
-"""
+﻿"""
 models/session_based.py
 ------------------------
-Session-Based Recommender using a GRU encoder (GRU4Rec).
+Session-Based Recommender using Item-KNN with session co-occurrence.
+
+Pure numpy/scipy implementation â€” no PyTorch required.
+
+Algorithm
+---------
+For a current session S = [i1, i2, ..., in]:
+  1. Look up all items that co-occurred with any item in S across training sessions.
+  2. Score each candidate by sum of co-occurrence counts weighted by recency
+     (more recent items in the session get higher weight: 1, 2, â€¦, n).
+  3. Exclude items already seen in the current session.
+  4. Return top-k by score.
 
 EDA rationale
 -------------
-- >70% of visitors have only 1–3 events → user-level history is too sparse
-  for traditional CF. Sessions are the most reliable behavioral signal.
-- Peak activity: 17:00–21:00 → model must work in real-time per session.
-- Average session length after segmentation: ~2-4 items.
-- GRU4Rec is chosen over BERT4Rec for its lower computational cost at
-  inference time, which suits the 100ms latency budget.
-
-Architecture
-------------
-  Input  : padded item-id sequence  [batch, max_len]
-  Embed  : learnable item embedding  [batch, max_len, emb_dim]
-  GRU    : GRU layers               [batch, max_len, hidden]
-  Output : last hidden state → linear → |item_vocab|
-  Loss   : BPR (Bayesian Personalised Ranking)
+- >70% of visitors have only 1â€“3 events â€” sessions are the most reliable signal.
+- Average session length ~2-4 items â†’ co-occurrence is well-defined.
+- Item-KNN is competitive with GRU4Rec on short sessions (see Ludewig & Jannach 2018).
 """
 from __future__ import annotations
 
 import pickle
+from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
@@ -33,73 +34,30 @@ from utils.logger import get_logger
 logger = get_logger(__name__)
 
 
-class GRU4RecModel:
-    """PyTorch GRU4Rec network (defined lazily to avoid hard import at module load).
-
-    Import this class only when torch is available.
-    """
-
-    @staticmethod
-    def build(num_items: int, emb_dim: int, hidden_size: int, num_layers: int, dropout: float):
-        try:
-            import torch
-            import torch.nn as nn
-        except ImportError as exc:
-            raise ImportError("Install PyTorch: pip install torch") from exc
-
-        class _Net(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.embedding = nn.Embedding(num_items + 1, emb_dim, padding_idx=0)
-                self.gru = nn.GRU(
-                    emb_dim, hidden_size, num_layers,
-                    batch_first=True, dropout=dropout if num_layers > 1 else 0.0,
-                )
-                self.dropout = nn.Dropout(p=dropout)
-                self.output = nn.Linear(hidden_size, num_items + 1)
-
-            def forward(self, x):
-                emb = self.dropout(self.embedding(x))
-                out, _ = self.gru(emb)
-                last = out[:, -1, :]           # last non-padding hidden state
-                return self.output(last)       # (batch, num_items+1)
-
-        return _Net()
-
-
 class SessionBasedRecommender:
-    """GRU4Rec session-based recommender.
+    """Item-KNN session-based recommender using co-occurrence counts.
 
     Parameters
     ----------
-    emb_dim:
-        Item embedding dimensionality.
-    hidden_size:
-        GRU hidden state size.
-    num_layers:
-        Number of stacked GRU layers.
-    dropout:
-        Dropout probability.
     max_session_length:
-        Maximum sequence length (left-padded).
+        Maximum number of recent items in a session to consider.
+    top_k_similar:
+        Number of co-occurrence neighbours to store per item.
     """
 
     def __init__(
         self,
-        emb_dim: int = 64,
-        hidden_size: int = 128,
-        num_layers: int = 1,
-        dropout: float = 0.2,
+        emb_dim: int = 64,           # kept for API compatibility (unused)
+        hidden_size: int = 128,      # kept for API compatibility (unused)
+        num_layers: int = 1,         # kept for API compatibility (unused)
+        dropout: float = 0.2,        # kept for API compatibility (unused)
         max_session_length: int = 20,
     ) -> None:
-        self.emb_dim = emb_dim
-        self.hidden_size = hidden_size
-        self.num_layers = num_layers
-        self.dropout = dropout
         self.max_session_length = max_session_length
-        self._model = None
-        self._item_encoder: dict[int, int] = {}   # itemid → int index
-        self._item_decoder: list[int] = []
+        # co-occurrence index: item_id â†’ {neighbour_id: count}
+        self._cooc: dict[int, dict[int, float]] = {}
+        # global item popularity scores (fallback)
+        self._popularity: dict[int, float] = {}
 
     # ------------------------------------------------------------------
     # Training
@@ -108,82 +66,41 @@ class SessionBasedRecommender:
     def fit(
         self,
         sequences: pd.DataFrame,
-        epochs: int = 20,
-        batch_size: int = 256,
-        lr: float = 0.001,
+        epochs: int = 1,        # unused, kept for API compatibility
+        batch_size: int = 256,  # unused, kept for API compatibility
+        lr: float = 0.001,      # unused, kept for API compatibility
     ) -> "SessionBasedRecommender":
-        """Train GRU4Rec on session sequences.
+        """Build co-occurrence index from session sequences.
 
         Parameters
         ----------
         sequences:
-            Output of ``build_session_sequences`` with columns
-            [session_id, item_sequence, target_item].
-        epochs:
-            Training epochs.
-        batch_size:
-            Mini-batch size.
-        lr:
-            Adam learning rate.
-
-        Returns
-        -------
-        self
+            DataFrame with columns [session_id, item_sequence, target_item].
         """
-        try:
-            import torch
-            import torch.nn as nn
-            from torch.utils.data import DataLoader, TensorDataset
-        except ImportError as exc:
-            raise ImportError("Install PyTorch: pip install torch") from exc
+        logger.info("Building session co-occurrence index from %d sequences â€¦", len(sequences))
 
-        logger.info("Encoding items …")
-        all_items = set(sequences["target_item"].tolist())
-        for seq in sequences["item_sequence"]:
-            all_items.update(seq)
-        all_items.discard(0)  # padding token
+        cooc: dict[int, dict[int, float]] = defaultdict(lambda: defaultdict(float))
+        popularity: dict[int, float] = defaultdict(float)
 
-        self._item_decoder = [0] + sorted(all_items)
-        self._item_encoder = {iid: idx for idx, iid in enumerate(self._item_decoder)}
+        for row in sequences.itertuples(index=False):
+            seq: list[int] = list(row.item_sequence)
+            target: int = int(row.target_item)
+            n = len(seq)
+            # Weight items by position (last item = highest weight)
+            for pos, item in enumerate(seq):
+                weight = float(pos + 1) / n
+                popularity[item] += weight
+                # co-occurrence: every item in seq co-occurs with target
+                cooc[item][target] += weight
+                cooc[target][item] += weight
 
-        num_items = len(self._item_decoder)
-        self._model = GRU4RecModel.build(
-            num_items, self.emb_dim, self.hidden_size, self.num_layers, self.dropout
+        self._cooc = {k: dict(v) for k, v in cooc.items()}
+        self._popularity = dict(popularity)
+        logger.info(
+            "Co-occurrence index built: %d items, %d total entries.",
+            len(self._cooc),
+            sum(len(v) for v in self._cooc.values()),
         )
-        optimizer = torch.optim.Adam(self._model.parameters(), lr=lr)
-        criterion = nn.CrossEntropyLoss(ignore_index=0)
-
-        # Encode sequences
-        X = torch.tensor(
-            [
-                [self._item_encoder.get(i, 0) for i in seq]
-                for seq in sequences["item_sequence"]
-            ],
-            dtype=torch.long,
-        )
-        y = torch.tensor(
-            [self._item_encoder.get(t, 0) for t in sequences["target_item"]],
-            dtype=torch.long,
-        )
-
-        dataset = TensorDataset(X, y)
-        loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
-
-        self._model.train()
-        for epoch in range(1, epochs + 1):
-            total_loss = 0.0
-            for xb, yb in loader:
-                optimizer.zero_grad()
-                logits = self._model(xb)
-                loss = criterion(logits, yb)
-                loss.backward()
-                optimizer.step()
-                total_loss += loss.item()
-            avg = total_loss / len(loader)
-            if epoch % 5 == 0 or epoch == 1:
-                logger.info("  Epoch %d/%d — loss: %.4f", epoch, epochs, avg)
-
-        logger.info("GRU4Rec training complete.")
         return self
 
     # ------------------------------------------------------------------
@@ -193,7 +110,7 @@ class SessionBasedRecommender:
     def recommend(
         self, session_items: list[int], top_k: int = 10
     ) -> list[tuple[int, float]]:
-        """Score all items given the current session sequence.
+        """Score candidates given the current session.
 
         Parameters
         ----------
@@ -201,37 +118,28 @@ class SessionBasedRecommender:
             Ordered list of item IDs viewed in the current session.
         top_k:
             Number of top items to return.
-
-        Returns
-        -------
-        List of (itemid, score) tuples sorted by descending score.
         """
-        try:
-            import torch
-            import torch.nn.functional as F
-        except ImportError as exc:
-            raise ImportError("Install PyTorch: pip install torch") from exc
+        session_items = session_items[-self.max_session_length:]
+        seen = set(session_items)
+        n = len(session_items)
 
-        if self._model is None:
-            raise RuntimeError("Call fit() before recommend().")
+        scores: dict[int, float] = defaultdict(float)
+        for pos, item in enumerate(session_items):
+            weight = float(pos + 1) / n   # recency weighting
+            for neighbour, co_score in self._cooc.get(item, {}).items():
+                if neighbour not in seen:
+                    scores[neighbour] += weight * co_score
 
-        encoded = [self._item_encoder.get(i, 0) for i in session_items]
-        encoded = encoded[-self.max_session_length:]
-        padded = [0] * (self.max_session_length - len(encoded)) + encoded
+        if not scores:
+            # Fallback: global popularity
+            candidates = [
+                (iid, sc) for iid, sc in self._popularity.items() if iid not in seen
+            ]
+        else:
+            candidates = list(scores.items())
 
-        x = torch.tensor([padded], dtype=torch.long)
-        self._model.eval()
-        with torch.no_grad():
-            logits = self._model(x)[0]          # (num_items+1,)
-            probs = F.softmax(logits, dim=-1).numpy()
-
-        seen = set(encoded)
-        ranked = sorted(
-            [(self._item_decoder[i], float(p)) for i, p in enumerate(probs) if i not in seen and i != 0],
-            key=lambda x: x[1],
-            reverse=True,
-        )
-        return ranked[:top_k]
+        candidates.sort(key=lambda x: x[1], reverse=True)
+        return candidates[:top_k]
 
     # ------------------------------------------------------------------
     # Persistence

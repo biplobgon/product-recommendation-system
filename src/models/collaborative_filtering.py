@@ -26,7 +26,13 @@ logger = get_logger(__name__)
 
 
 class ALSRecommender:
-    """Wrapper around ``implicit`` ALS for implicit-feedback CF.
+    """Pure numpy/scipy ALS for implicit-feedback CF.
+
+    Implements the Hu, Koren & Volinsky (2008) weighted ALS:
+        confidence C_ui = 1 + alpha * r_ui
+        objective: minimise sum_{u,i} c_ui*(p_ui - x_u^T*y_i)^2 + lambda*(||x||^2+||y||^2)
+
+    No external C++ dependencies — works on any Python version.
 
     Parameters
     ----------
@@ -42,18 +48,19 @@ class ALSRecommender:
 
     def __init__(
         self,
-        factors: int = 128,
+        factors: int = 32,
         regularization: float = 0.01,
-        iterations: int = 20,
+        iterations: int = 10,
         alpha: float = 40.0,
     ) -> None:
         self.factors = factors
         self.regularization = regularization
         self.iterations = iterations
         self.alpha = alpha
-        self._model = None
-        self._user_index: dict[int, int] = {}   # visitorid → row index
-        self._item_index: dict[int, int] = {}   # itemid    → col index
+        self._X: np.ndarray | None = None   # user factors (n_users × factors)
+        self._Y: np.ndarray | None = None   # item factors (n_items × factors)
+        self._user_index: dict[int, int] = {}
+        self._item_index: dict[int, int] = {}
         self._item_ids: list[int] = []
 
     # ------------------------------------------------------------------
@@ -61,52 +68,77 @@ class ALSRecommender:
     # ------------------------------------------------------------------
 
     def fit(self, interactions: pd.DataFrame) -> "ALSRecommender":
-        """Train the ALS model.
-
-        Parameters
-        ----------
-        interactions:
-            DataFrame with columns [visitorid, itemid, score]
-            (output of ``build_user_item_matrix``).
-
-        Returns
-        -------
-        self
-        """
-        try:
-            import implicit
-        except ImportError as exc:
-            raise ImportError(
-                "Install 'implicit' to use ALSRecommender: pip install implicit"
-            ) from exc
-
-        logger.info("Fitting ALS model (factors=%d, iterations=%d) …", self.factors, self.iterations)
+        """Train ALS on an interactions DataFrame with columns [visitorid, itemid, score]."""
+        logger.info(
+            "Fitting ALS model (factors=%d, iterations=%d, %d interactions) …",
+            self.factors, self.iterations, len(interactions),
+        )
 
         users = interactions["visitorid"].unique()
         items = interactions["itemid"].unique()
+        n_users, n_items = len(users), len(items)
         self._user_index = {u: i for i, u in enumerate(users)}
         self._item_index = {it: i for i, it in enumerate(items)}
         self._item_ids = list(items)
 
-        rows = interactions["visitorid"].map(self._user_index)
-        cols = interactions["itemid"].map(self._item_index)
-        data = interactions["score"].values
+        u_idx = interactions["visitorid"].map(self._user_index).values
+        i_idx = interactions["itemid"].map(self._item_index).values
+        data = interactions["score"].values.astype(np.float32)
 
-        # item × user matrix (implicit convention)
-        item_user = sp.csr_matrix(
-            (data, (cols, rows)),
-            shape=(len(items), len(users)),
-            dtype=np.float32,
-        )
-        item_user_conf = (item_user * self.alpha).astype(np.float32)
+        # Sparse user×item confidence matrix: C_ui = 1 + alpha * r_ui
+        # We store only the non-zero (alpha * r_ui) part; background = 1 is handled analytically
+        R = sp.csr_matrix((data, (u_idx, i_idx)), shape=(n_users, n_items), dtype=np.float32)
+        # C_data[k] = 1 + alpha * R.data[k]  for each stored entry
+        C_data = (1.0 + self.alpha * R.data).astype(np.float32)
 
-        self._model = implicit.als.AlternatingLeastSquares(
-            factors=self.factors,
-            regularization=self.regularization,
-            iterations=self.iterations,
-            random_state=42,
+        # CSC version for item-step
+        R_csc = R.tocsc()
+        C_csc = sp.csc_matrix(
+            (C_data[R.tocsr().tocoo().row.argsort()],   # re-sort nnz entries for csc
+             (R_csc.indices, np.repeat(np.arange(n_items), np.diff(R_csc.indptr)))),
+            shape=(n_users, n_items), dtype=np.float32,
         )
-        self._model.fit(item_user_conf)
+        # Simpler: rebuild C_csc from scratch
+        C_csc = sp.csc_matrix(
+            (1.0 + self.alpha * R_csc.data, R_csc.indices, R_csc.indptr),
+            shape=(n_users, n_items), dtype=np.float32,
+        )
+
+        rng = np.random.default_rng(42)
+        self._X = (rng.standard_normal((n_users, self.factors)) * 0.01).astype(np.float32)
+        self._Y = (rng.standard_normal((n_items, self.factors)) * 0.01).astype(np.float32)
+
+        lam_I = self.regularization * np.eye(self.factors, dtype=np.float32)
+
+        for iteration in range(self.iterations):
+            # --- update user factors ---
+            YtY = self._Y.T @ self._Y
+            for u in range(n_users):
+                s, e = R.indptr[u], R.indptr[u + 1]
+                if s == e:
+                    continue
+                ii = R.indices[s:e]
+                c_u = C_data[s:e]          # confidence weights for user u
+                Y_u = self._Y[ii]          # (nnz × f)
+                A = YtY + (Y_u * (c_u - 1.0)[:, None]).T @ Y_u + lam_I
+                b = (Y_u * c_u[:, None]).sum(axis=0)
+                self._X[u] = np.linalg.solve(A, b)
+
+            # --- update item factors ---
+            XtX = self._X.T @ self._X
+            for i in range(n_items):
+                s, e = R_csc.indptr[i], R_csc.indptr[i + 1]
+                if s == e:
+                    continue
+                uu = R_csc.indices[s:e]
+                c_i = C_csc.data[s:e]
+                X_i = self._X[uu]
+                A = XtX + (X_i * (c_i - 1.0)[:, None]).T @ X_i + lam_I
+                b = (X_i * c_i[:, None]).sum(axis=0)
+                self._Y[i] = np.linalg.solve(A, b)
+
+            logger.info("  ALS iteration %d / %d done.", iteration + 1, self.iterations)
+
         logger.info("ALS training complete.")
         return self
 
@@ -121,50 +153,28 @@ class ALSRecommender:
         top_k: int = 10,
         filter_already_seen: bool = True,
     ) -> list[tuple[int, float]]:
-        """Return top-k item recommendations for a visitor.
-
-        Parameters
-        ----------
-        visitor_id:
-            Target visitor.
-        interactions:
-            Full user-item interaction DataFrame for filtering seen items.
-        top_k:
-            Number of recommendations to return.
-        filter_already_seen:
-            Exclude items the visitor has already interacted with.
-
-        Returns
-        -------
-        List of (itemid, score) tuples sorted by descending score.
-        """
-        if self._model is None:
+        """Return top-k item recommendations for a visitor."""
+        if self._X is None:
             raise RuntimeError("Model has not been trained yet. Call fit() first.")
 
         if visitor_id not in self._user_index:
             logger.warning("Visitor %s not in training set — no CF recommendations.", visitor_id)
             return []
 
-        user_idx = self._user_index[visitor_id]
-        users = interactions["visitorid"].unique()
-        items_all = interactions["itemid"].unique()
+        u = self._user_index[visitor_id]
+        scores = self._X[u] @ self._Y.T   # (n_items,)
 
-        rows = interactions["visitorid"].map(self._user_index).dropna().astype(int)
-        cols = interactions["itemid"].map(self._item_index).dropna().astype(int)
-        data = interactions["score"].values[rows.index]
+        if filter_already_seen:
+            seen_items = interactions.loc[
+                interactions["visitorid"] == visitor_id, "itemid"
+            ]
+            for iid in seen_items:
+                if iid in self._item_index:
+                    scores[self._item_index[iid]] = -np.inf
 
-        user_items = sp.csr_matrix(
-            (data, (rows.values, cols.values)),
-            shape=(len(users), len(items_all)),
-        )
-
-        recs = self._model.recommend(
-            user_idx,
-            user_items[user_idx],
-            N=top_k,
-            filter_already_liked=filter_already_seen,
-        )
-        return [(self._item_ids[i], float(s)) for i, s in zip(recs[0], recs[1])]
+        top_idx = np.argpartition(scores, -top_k)[-top_k:]
+        top_idx = top_idx[np.argsort(scores[top_idx])[::-1]]
+        return [(self._item_ids[i], float(scores[i])) for i in top_idx]
 
     # ------------------------------------------------------------------
     # Persistence

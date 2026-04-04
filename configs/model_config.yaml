@@ -41,11 +41,12 @@ features:
 # ---------------------------------------------------------------------------
 collaborative_filtering:
   model: als
-  factors: 128
+  factors: 32          # reduced for pure numpy perf; increase if GPU/implicit available
   regularization: 0.01
-  iterations: 20
+  iterations: 10
   alpha: 40           # confidence scaling: c_ui = 1 + alpha * r_ui
   use_gpu: false
+  min_interactions: 5  # only train on users with >= this many events
 
 # ---------------------------------------------------------------------------
 # Content-Based Filtering

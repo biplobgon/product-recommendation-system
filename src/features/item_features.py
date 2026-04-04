@@ -53,18 +53,9 @@ def build_item_features(
     logger.info("Building item features from %d property records …", len(item_props))
 
     df = item_props.copy()
-    df["datetime"] = pd.to_datetime(df["timestamp"], unit="ms")
+    df["datetime"] = pd.to_datetime(pd.to_numeric(df["timestamp"], errors="coerce"), unit="ms")
 
-    # --- Latest value per (item, property) -----------------------------------
-    latest = (
-        df.sort_values("datetime")
-        .groupby(["itemid", "property"])
-        .last()
-        .reset_index()[["itemid", "property", "value"]]
-    )
-    pivoted = latest.pivot(index="itemid", columns="property", values="value")
-
-    # --- Core features -------------------------------------------------------
+    # --- Core aggregates -----------------------------------------------------
     agg = df.groupby("itemid").agg(
         n_property_updates=("property", "count"),
         n_properties=("property", "nunique"),
@@ -72,35 +63,39 @@ def build_item_features(
         last_seen=("datetime", "max"),
     ).reset_index()
 
-    # Attach categoryid if the property exists
-    if "categoryid" in pivoted.columns:
-        cat_map = pivoted["categoryid"].reset_index()
-        cat_map.columns = ["itemid", "categoryid"]
-        cat_map["categoryid"] = pd.to_numeric(cat_map["categoryid"], errors="coerce")
-        agg = agg.merge(cat_map, on="itemid", how="left")
+    # Single-pass extraction of the 3 properties we need (avoids full pivot OOM)
+    TARGET_PROPS = {"categoryid", "790", "available"}
+    sub = df[df["property"].isin(TARGET_PROPS)].sort_values("datetime")
+    latest_sub = (
+        sub.groupby(["itemid", "property"])["value"]
+        .last()
+        .unstack(level="property")   # only 3 columns wide — safe
+        .reset_index()
+    )
+
+    # Attach categoryid
+    if "categoryid" in latest_sub.columns:
+        latest_sub["categoryid"] = pd.to_numeric(latest_sub["categoryid"], errors="coerce")
+        agg = agg.merge(latest_sub[["itemid", "categoryid"]], on="itemid", how="left")
     else:
         agg["categoryid"] = np.nan
 
-    # Attach price
-    if "790" in pivoted.columns:  # property 790 is commonly price in RetailRocket
-        price_map = pivoted["790"].reset_index()
-        price_map.columns = ["itemid", "price_raw"]
-        price_map["price"] = pd.to_numeric(
-            price_map["price_raw"].str.extract(r"([\d.]+)", expand=False),
+    # Attach price (property "790")
+    if "790" in latest_sub.columns:
+        latest_sub["price"] = pd.to_numeric(
+            latest_sub["790"].str.extract(r"([\d.]+)", expand=False),
             errors="coerce",
         )
-        agg = agg.merge(price_map[["itemid", "price"]], on="itemid", how="left")
+        agg = agg.merge(latest_sub[["itemid", "price"]], on="itemid", how="left")
     else:
         agg["price"] = np.nan
 
     # Attach availability
-    if "available" in pivoted.columns:
-        avail_map = pivoted["available"].reset_index()
-        avail_map.columns = ["itemid", "available_raw"]
-        avail_map["available"] = avail_map["available_raw"].map(
+    if "available" in latest_sub.columns:
+        latest_sub["available"] = latest_sub["available"].map(
             {"1": True, "0": False, 1: True, 0: False}
         )
-        agg = agg.merge(avail_map[["itemid", "available"]], on="itemid", how="left")
+        agg = agg.merge(latest_sub[["itemid", "available"]], on="itemid", how="left")
     else:
         agg["available"] = np.nan
 

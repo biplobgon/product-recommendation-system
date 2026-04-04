@@ -1,0 +1,9 @@
+model,k,hit_rate,ndcg,mrr,precision,recall,coverage,novelty
+ALS (Collaborative Filtering),5,0.0,0.0,0.0,0.0,0.0,0.0,0.0
+ALS (Collaborative Filtering),10,0.0,0.0,0.0,0.0,0.0,0.0,0.0
+Content-Based (TF-IDF),5,0.0,0.0,0.0,0.0,0.0,0.0,0.0
+Content-Based (TF-IDF),10,0.0,0.0,0.0,0.0,0.0,0.0,0.0
+Session-Based (Item-KNN),5,0.0882,0.0485,0.0353,0.0176,0.0882,0.0398,16.011
+Session-Based (Item-KNN),10,0.1188,0.0583,0.0394,0.0119,0.1188,0.0671,15.4431
+Hybrid (All Models),5,0.085,0.0468,0.0341,0.017,0.085,0.0388,15.9353
+Hybrid (All Models),10,0.115,0.0564,0.0381,0.0115,0.115,0.0652,15.3574
