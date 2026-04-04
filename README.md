@@ -451,9 +451,9 @@ streamlit run src/app/dashboard.py
 | 🟢 Low | **GNN over category hierarchy** — co-purchase + category graph for structural similarity |
 | 🟢 Low | **Reinforcement learning bandit** — explore-exploit policy for dynamic recommendation |
 
-## 🎯 Executive Summary
+---
 
-### The Problem
+## ☁️ Google Cloud Storage Setup
 
 E-commerce recommendation engines face a brutal sparsity problem. In this dataset, **>70 % of visitors have ≤ 3 interactions** and transactions represent only **0.5 %** of all events. A single model cannot solve this:
 
