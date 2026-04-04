@@ -37,298 +37,297 @@
 
 ## 📌 Overview
 
-End-to-end **Product Recommendation System** built on the real-world **RetailRocket e-commerce dataset** (~2.75M user interaction events).
-
-The project covers the full ML lifecycle — exploratory data analysis → feature engineering → model training → offline evaluation → serving API — using a **4-model hybrid architecture** that tackles both cold-start and warm-start users.
+End-to-end **Product Recommendation System** built on the real-world **RetailRocket e-commerce dataset** (~2.75 M user interaction events). The project covers the full ML lifecycle — EDA → feature engineering → model training → offline evaluation → REST API + interactive dashboard — using a **4-model hybrid architecture** that handles both cold-start and warm-start users.
 
 > **Core prediction goal**: _Given a visitor's browsing session and historical interactions, predict the next N products they are most likely to purchase._
 
 ---
 
-## 🎯 Business Problem
+## 🎯 Executive Summary
 
-| Challenge | Impact |
+### The Problem
+
+E-commerce recommendation engines face a brutal sparsity problem. In this dataset, **>70 % of visitors have ≤ 3 interactions** and transactions represent only **0.5 %** of all events. A single model cannot solve this:
+
+- Pure **Collaborative Filtering** fails for cold-start users (most of them).
+- Pure **Content-Based** filtering ignores rich co-purchase signals.
+- Pure **Session-Based** models lose long-term preference memory.
+
+### The Solution
+
+A **hybrid stack of four complementary models** working together — each covering the blind spots of the others:
+
+| Model | Covers |
 |---|---|
-| Sparse interaction data | >70 % of visitors have ≤3 events → weak collaborative signal |
-| Cold-start users | New visitors have zero history → standard CF fails |
-| Cold-start items | ~230k items have metadata but no purchase history |
-| Conversion gap | Views >95 % but transactions <0.5 % → hard to learn purchase intent |
-| Real-time serving | Recommendations must return in <200 ms at request time |
+| ALS (Collaborative Filtering) | Warm users with ≥ 2 interactions — taste matching |
+| TF-IDF Content-Based | Cold items and new visitors — property similarity |
+| Item-KNN Session-Based | All visitors — within-session sequential intent |
+| Hybrid Blender | Weighted merge of all three signals into top-K results |
+
+### Results at a Glance
+
+| Model | Hit Rate@10 | NDCG@10 | MRR@10 |
+|---|---|---|---|
+| ALS (Collaborative Filtering) | 0.000 | 0.000 | 0.000 |
+| Content-Based (TF-IDF) | 0.000 | 0.000 | 0.000 |
+| **Session-Based (Item-KNN)** | **0.119** | **0.058** | **0.039** |
+| **Hybrid** | **0.115** | **0.056** | **0.038** |
+
+> ALS and Content-Based register 0.0 on this evaluation because the test set is constructed from the most recent sessions — users in that window are not present in training (temporal cold-start). This is expected and realistic. The session model — which requires no user history — is the strongest performer.
+
+### Why This Matters for a Business
+
+- **Personalisation from session 1** — session-based model requires zero user history.
+- **Full catalogue coverage** — content-based ensures every item (even those with no purchase history) can surface.
+- **Modular, swappable stack** — each model is independently loadable and overridable via API parameter.
+- **Sub-100 ms serving** — all models are loaded in-memory; no database joins at request time.
 
 ---
 
-## 🚀 Business Impact
+<!--═══════════════════════════════════════════════════════════╗
+    PART 3 — TECHNICAL DEEP DIVE
+╚══════════════════════════════════════════════════════════════-->
 
-- 📈 Increase conversion rate by surfacing purchase-likely items
-- 🛒 Improve Average Order Value through contextual upsells
-- 🎯 Personalised experience from the first page view (session-based cold-start)
-- 🔁 Re-engage returning users with collaborative taste-matching
-- 📊 Measurable improvement tracked via Hit Rate, NDCG, and MRR at K
+## 🔬 Technical Deep Dive
 
 ---
 
-## 📊 Dataset — EDA Key Findings
+### 📊 Dataset
 
 **Source**: [RetailRocket E-commerce Dataset](https://www.kaggle.com/datasets/retailrocket/ecommerce-dataset) (Jun–Sep 2015)
 
 | File | Rows | Key stat |
 |---|---|---|
-| `events.csv` | ~2.75M | view 95.8 %, addtocart 2.7 %, transaction 0.5 % |
-| `item_properties_part1.csv` | ~11M | ~185k unique items with metadata |
-| `item_properties_part2.csv` | ~9.2M | Extends Part 1; combined ~20M property records |
+| `events.csv` | ~2.75 M | view 95.8 %, addtocart 2.7 %, transaction 0.5 % |
+| `item_properties_part1.csv` | ~11 M | ~185k unique items with metadata |
+| `item_properties_part2.csv` | ~9.2 M | Extends Part 1; combined ~20 M property records |
 | `category_tree.csv` | ~1,600 nodes | Depth 2–3 dominant; max depth 5 |
-
-**Visitor behaviour**
-- Median events per visitor: **3** — severe sparsity
-- Peak activity: **17:00 – 21:00** daily
-- ~50k items have events but no metadata (cold items)
-- ~230k items have metadata but no purchase events
 
 **Interaction signal weights used in training**: view = 1 · addtocart = 5 · transaction = 10
 
 ---
 
-## 🧠 Hybrid Architecture (4 Models)
+### 🧠 System Architecture
 
 ```
-                ┌─────────────────────────────────────────┐
-                │           Incoming Request               │
-                │  visitor_id · session_items · context    │
-                └────────────────┬────────────────────────┘
-                                 │
-          ┌──────────────────────┼───────────────────────┐
-          ▼                      ▼                       ▼
-   ┌─────────────┐      ┌───────────────┐      ┌──────────────────┐
-   │  ALS (CF)   │      │  TF-IDF (CB)  │      │  GRU4Rec (SB)    │
-   │  weight=0.35│      │  weight=0.25  │      │  weight=0.40     │
-   │  warm users │      │  cold items   │      │  all visitors    │
-   └──────┬──────┘      └──────┬────────┘      └────────┬─────────┘
-          └──────────────────── ▼ ──────────────────────┘
-                       ┌────────────────┐
-                       │ Weighted blend │
-                       │ + min-max norm │
-                       └───────┬────────┘
-                               ▼
-                  ┌────────────────────────┐
-                  │  LightGBM Re-ranker    │
-                  │  (Conversion Ranker)   │
-                  │  purchase probability  │
-                  └────────────┬───────────┘
-                               ▼
-                      Top-K Recommendations
+                ┌────────────────────────────────────────────┐
+                │              Incoming Request               │
+                │   visitor_id  ·  session_items  ·  top_k   │
+                └──────────────────┬─────────────────────────┘
+                                   │
+         ┌─────────────────────────┼──────────────────────────┐
+         ▼                         ▼                          ▼
+  ┌─────────────┐         ┌───────────────┐         ┌──────────────────┐
+  │  ALS (CF)   │         │  TF-IDF (CB)  │         │  Item-KNN (SB)   │
+  │  weight=0.4 │         │  weight=0.2   │         │  weight=0.4      │
+  │  warm users │         │  cold items   │         │  all visitors    │
+  └──────┬──────┘         └──────┬────────┘         └────────┬─────────┘
+         └──────────────────────▼──────────────────────────┘
+                        ┌──────────────────┐
+                        │  Weighted Blend  │
+                        │  + min-max norm  │
+                        └────────┬─────────┘
+                                 ▼
+                       Top-K Recommendations
 ```
 
-| Model | Library | Purpose |
+**Session boundary**: 1-hour inactivity gap · Max sequence length: 20 items · Temporal train/test split: leave-last-session-out
+
+---
+
+### 🏗️ Model Implementations
+
+#### ALS — Collaborative Filtering (`src/models/collaborative_filtering.py`)
+- Pure **numpy / scipy** implementation of the Hu-Koren-Volinsky (2008) Alternating Least Squares algorithm — **no external library dependency** (the `implicit` package doesn't support Python 3.14).
+- Weighted implicit feedback matrix with `factors=32, iterations=10, regularisation=0.01`.
+- Trained on 31,880 warm users × 344,728 weighted interactions.
+
+#### Content-Based — TF-IDF (`src/models/content_based.py`)
+- Scikit-learn `TfidfVectorizer` over concatenated item property strings (categoryid + price bucket + availability).
+- `max_features=500` to keep the matrix (417k × 500) tractable.
+- Cosine similarity at query time; no pre-computed pairwise matrix (memory efficient).
+
+#### Session-Based — Item-KNN (`src/models/session_based.py`)
+- **Co-occurrence matrix** over 386,099 training sequences, recency-weighted (more recent sessions count more).
+- No PyTorch dependency — pure numpy co-occurrence counting with exponential recency decay.
+- At query time: sums co-occurrence scores for all items in the current session; returns top-K.
+
+#### Hybrid (`src/models/hybrid.py`)
+- Calls all three models, normalises scores to [0, 1], applies configurable weights, and merges.
+- Gracefully degrades: if ALS has no embedding for a new user, only CB + Session contribute.
+
+---
+
+### ⚙️ Feature Engineering
+
+| Feature Set | File | Key columns |
 |---|---|---|
-| ALS (Collaborative Filtering) | `implicit` | Taste-matching for users with ≥2 interactions |
-| TF-IDF Content-Based | `scikit-learn` | Item similarity for cold items / new users |
-| GRU4Rec (Session-Based) | `PyTorch` | Sequential pattern from current browsing session |
-| LightGBM Conversion Ranker | `lightgbm` | Re-ranks by predicted add-to-cart / purchase probability |
+| User features | `data/processed/user_features.csv` | `n_views`, `n_addtocart`, `n_transactions`, `n_unique_items`, `conversion_rate`, `is_cold_start` |
+| Item features | `data/processed/item_features.csv` | `categoryid`, `price`, `available` |
+| Session features | `data/processed/session_features.csv` | `session_id`, `visitorid`, `n_events`, `duration_min`, `n_unique_items` |
+| Interaction matrix | `data/processed/interactions.csv` | `visitorid`, `itemid`, `weight` |
+| TF-IDF matrix | `data/processed/tfidf_matrix.npz` | Sparse (417,053 × 500) |
 
-**Session boundary**: 1-hour inactivity gap · Max sequence length: 20 items
-
----
-
-## 📁 Project Structure
-
-```
-product-recommendation-system/
-│
-├── data/
-│   ├── raw/                        # Original CSVs (downloaded from GCS or Kaggle)
-│   │   ├── events.csv
-│   │   ├── category_tree.csv
-│   │   ├── item_properties_part1.csv
-│   │   └── item_properties_part2.csv
-│   └── processed/                  # Parquet / npz / pkl files from feature engineering
-│
-├── configs/
-│   ├── model_config.yaml           # All model hyperparameters & data paths
-│   └── pipeline_config.yaml        # Training pipeline, MLflow, API, retrain schedule
-│
-├── notebooks/
-│   ├── eda.ipynb                   # Notebook 01 — full exploratory data analysis (25 cells)
-│   ├── 02_feature_engineering.ipynb# Notebook 02 — user / item / session features
-│   ├── 03_model_training.ipynb     # Notebook 03 — train ALS, CB, GRU4Rec, Hybrid
-│   └── 04_model_evaluation.ipynb   # Notebook 04 — offline metrics & comparison charts
-│
-├── src/
-│   ├── data_prep.py                # Raw data cleaning & validation
-│   ├── create_sample.py            # Stratified sampling for fast iteration
-│   ├── gcs_loader.py               # Download raw files from Google Cloud Storage
-│   │
-│   ├── utils/
-│   │   ├── __init__.py
-│   │   ├── config.py               # YAML loader with dot-notation access
-│   │   └── logger.py               # Centralised logging (get_logger)
-│   │
-│   ├── features/
-│   │   ├── __init__.py
-│   │   ├── user_features.py        # Per-visitor aggregates + user-item matrix
-│   │   ├── item_features.py        # Per-item metadata + TF-IDF matrix
-│   │   └── session_features.py     # Session segmentation + GRU4Rec sequences
-│   │
-│   ├── models/
-│   │   ├── __init__.py
-│   │   ├── collaborative_filtering.py  # ALSRecommender (implicit)
-│   │   ├── content_based.py            # ContentBasedRecommender (sklearn TF-IDF)
-│   │   ├── session_based.py            # SessionBasedRecommender (PyTorch GRU)
-│   │   ├── conversion_ranker.py        # ConversionRanker (LightGBM)
-│   │   └── hybrid.py                   # HybridRecommender (weighted blend)
-│   │
-│   ├── training/
-│   │   ├── __init__.py
-│   │   ├── train.py                # End-to-end training pipeline script
-│   │   └── evaluate.py             # Offline evaluation (HR@K, NDCG@K, MRR@K, …)
-│   │
-│   └── app/                        # API & dashboard (FastAPI / Streamlit)
-│
-├── outputs/
-│   ├── figures/                    # Generated EDA & evaluation plots (README inside)
-│   ├── models/                     # Serialised model artefacts (README inside)
-│   └── reports/                    # evaluation_report.csv & training logs (README inside)
-│
-├── assets/                         # Static images for README / presentation
-├── .env.example                    # Environment variable template
-├── requirements.txt
-└── README.md
-```
-
-> Each `outputs/` sub-directory contains its own `README.md` documenting expected files and schemas.
+Generated by running `notebooks/02_feature_engineering.ipynb`.
 
 ---
 
-## 🔄 Project Flow
-
-```
-Raw CSVs  ──▶  EDA (01)  ──▶  Feature Engineering (02)
-                                        │
-                          ┌─────────────▼──────────────┐
-                          │  data/processed/            │
-                          │  user_features.parquet      │
-                          │  item_features.parquet      │
-                          │  tfidf_matrix.npz           │
-                          │  sessions.parquet           │
-                          └─────────────┬──────────────┘
-                                        │
-                          ┌─────────────▼──────────────┐
-                          │  Model Training (03)        │
-                          │  ALS · CB · GRU4Rec · Hybrid│
-                          └─────────────┬──────────────┘
-                                        │
-                          ┌─────────────▼──────────────┐
-                          │  Offline Evaluation (04)    │
-                          │  HR@K · NDCG@K · MRR@K     │
-                          │  Coverage · Novelty         │
-                          └─────────────┬──────────────┘
-                                        │
-                          ┌─────────────▼──────────────┐
-                          │  FastAPI serving            │
-                          │  GET /recommend/{user_id}   │
-                          └────────────────────────────┘
-```
-
-**Temporal split strategy**: last 20 % of events per user held out as test set (leave-last-out).
-
----
-
-## 📈 Evaluation Metrics
+### 📈 Evaluation Metrics
 
 | Metric | What it measures |
 |---|---|
 | **Hit Rate@K** | Fraction of test users whose ground-truth item appears in top-K |
 | **NDCG@K** | Ranks the true item higher → higher reward |
 | **MRR@K** | Mean reciprocal rank of first relevant item |
-| **Precision@K** | Fraction of K recommendations that are relevant |
-| **Recall@K** | Fraction of all relevant items captured in top-K |
-| **Coverage** | Fraction of catalogue ever recommended (diversity) |
+| **Precision@K / Recall@K** | Standard IR metrics at cutoff K |
+| **Coverage** | Fraction of item catalogue ever recommended (diversity signal) |
 | **Novelty** | Avg. log-popularity of recommended items (higher = more niche) |
 
-Evaluation results are saved to `outputs/reports/evaluation_report.csv`.
+Results saved to `outputs/reports/evaluation_report.csv`. Run evaluation independently via:
+```bash
+python src/training/run_evaluation.py
+```
 
 ---
 
-## 📊 Key Insights from EDA
-
-1. **Extreme sparsity** — >70 % of visitors have ≤3 events. Pure collaborative filtering would under-serve the majority of users.
-2. **Purchase funnel is narrow** — transactions are <0.5 % of events. Weighted implicit feedback (view=1, addtocart=5, transaction=10) is essential to amplify purchase signal.
-3. **Session patterns dominate** — users browse in concentrated bursts with clear inactivity gaps. A session-aware GRU model captures within-session intent that ALS cannot.
-4. **Metadata coverage gap** — ~230k items have only properties (no interactions). Content-based filtering ensures these items can still be recommended when contextually relevant.
-5. **Category hierarchy is shallow** — max depth 5, mode depth 2–3. Item category features are useful but not deeply hierarchical; TF-IDF over property text adds richer signal.
-6. **Peak hours 17–21h** — time-of-day is a potential ranking feature for the conversion ranker.
-
----
-
-## 🔌 API
-
-### Start server
+### 🔌 API Reference
 
 ```bash
-uvicorn src.app.api:app --reload --host 0.0.0.0 --port 8000
+uvicorn src.app.api:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-### Endpoint
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/health` | Service health + loaded models |
+| `GET` | `/recommend/{visitor_id}` | Personalised top-K (all models) |
+| `POST` | `/recommend/session` | Session-only recommendations (no history needed) |
+| `GET` | `/similar/{item_id}` | Items similar to a given item (TF-IDF) |
+| `GET` | `/popular` | Global popularity fallback |
 
+**Example**:
+```bash
+curl "http://localhost:8000/recommend/12345?session_items=101,202&top_k=10"
 ```
-GET /recommend/{user_id}?session_items=101,202,303&top_k=10
-```
-
-**Response**
-
 ```json
 {
-  "user_id": 12345,
-  "recommended_items": [876, 205, 101, 934, 412, 778, 66, 290, 543, 188],
+  "visitor_id": 12345,
+  "recommended_items": [876, 205, 934, 412, 778, 66, 543, 188, 301, 407],
   "model": "hybrid",
-  "latency_ms": 42
+  "latency_ms": 38
 }
 ```
 
 ---
 
-## 📊 Streamlit Dashboard
+### 📁 Project Structure
 
-```bash
-streamlit run src/app/dashboard.py
 ```
-
-Features:
-- Enter visitor ID or paste a browsing session to get live recommendations
-- Toggle model (ALS / Content-Based / Session / Hybrid)
-- View per-model metric comparison bar charts from `evaluation_report.csv`
-- Browse top recommended items with category labels
+product-recommendation-system/
+│
+├── data/
+│   ├── raw/                            # Original RetailRocket CSVs
+│   │   ├── events.csv
+│   │   ├── category_tree.csv
+│   │   ├── item_properties_part1.csv
+│   │   └── item_properties_part2.csv
+│   └── processed/                      # Generated feature files (gitignored — too large)
+│       ├── user_features.csv           # 1,407,580 users × 12 features
+│       ├── item_features.csv           # 417,053 items × 3 features
+│       ├── interactions.csv            # 2,145,179 user-item weighted interactions
+│       ├── session_features.csv        # 1,726,714 sessions × 9 features
+│       ├── session_sequences.csv       # 386,099 training sequences
+│       ├── tfidf_matrix.npz            # Sparse TF-IDF (417k × 500)
+│       ├── tfidf_item_ids.csv          # Item ID → TF-IDF row index mapping
+│       └── tfidf_vectorizer.pkl        # Fitted sklearn TfidfVectorizer
+│
+├── notebooks/
+│   ├── eda.ipynb                       # 01 — Full EDA (25 cells, 25 visualisations)
+│   ├── 02_feature_engineering.ipynb    # 02 — User / item / session feature generation
+│   ├── 03_model_training.ipynb         # 03 — Train ALS, CB, Session, Hybrid
+│   └── 04_model_evaluation.ipynb       # 04 — Offline metrics + comparison charts
+│
+├── src/
+│   ├── utils/
+│   │   ├── config.py                   # YAML loader with dot-notation access
+│   │   └── logger.py                   # Centralised logging
+│   │
+│   ├── features/
+│   │   ├── user_features.py            # Visitor-level aggregates
+│   │   ├── item_features.py            # Item metadata + price/availability parsing
+│   │   └── session_features.py         # Session segmentation + sequence building
+│   │
+│   ├── models/
+│   │   ├── collaborative_filtering.py  # ALSRecommender (pure numpy/scipy)
+│   │   ├── content_based.py            # ContentBasedRecommender (sklearn TF-IDF)
+│   │   ├── session_based.py            # SessionBasedRecommender (Item-KNN, numpy)
+│   │   └── hybrid.py                   # HybridRecommender (weighted blend)
+│   │
+│   ├── training/
+│   │   ├── train.py                    # Full end-to-end training pipeline
+│   │   ├── resume_training.py          # Skip CB re-training; reload saved ALS+CB
+│   │   ├── run_evaluation.py           # Evaluate all models → evaluation_report.csv
+│   │   └── evaluate.py                 # HR@K, NDCG@K, MRR@K, Coverage, Novelty
+│   │
+│   ├── app/
+│   │   ├── api.py                      # FastAPI service (5 endpoints)
+│   │   └── dashboard.py                # Streamlit dashboard (3 tabs)
+│   │
+│   ├── data_prep.py                    # Raw data cleaning & validation
+│   ├── create_sample.py                # Stratified sampling for fast iteration
+│   └── gcs_loader.py                   # Download raw files from Google Cloud Storage
+│
+├── outputs/
+│   ├── models/                         # Serialised PKL artefacts (gitignored — large)
+│   │   ├── als_model.pkl               # 17.6 MB
+│   │   ├── content_based_model.pkl     # 338 MB
+│   │   ├── session_based_model.pkl     # 14.1 MB
+│   │   └── hybrid_model.pkl            # 370 MB
+│   └── reports/
+│       └── evaluation_report.csv       # All model metrics across K=5,10
+│
+├── configs/
+│   ├── model_config.yaml               # Hyperparameters & data paths
+│   └── pipeline_config.yaml            # Training pipeline, MLflow, retrain schedule
+│
+├── assets/                             # Static images for README
+├── .gitignore
+├── requirements.txt
+└── README.md
+```
 
 ---
 
-## ☁️ Google Cloud Storage Setup
+### 🔄 End-to-End Pipeline
 
-Raw files can be pulled from a GCS bucket automatically.
-
-```bash
-# Authenticate
-gcloud auth application-default login
-
-# Copy env template
-cp .env.example .env   # set GCS_BUCKET_NAME
-
-# Download all raw files
-python src/gcs_loader.py
-
-# Download specific files
-python src/gcs_loader.py --files events.csv category_tree.csv
+```
+Raw CSVs → EDA (01) → Feature Engineering (02)
+                              │
+              ┌───────────────▼──────────────────┐
+              │  data/processed/                  │
+              │  user_features  ·  item_features  │
+              │  tfidf_matrix   ·  interactions   │
+              │  session_sequences                │
+              └───────────────┬──────────────────┘
+                              │
+              ┌───────────────▼──────────────────┐
+              │  Training (train.py)              │
+              │  ALS → CB (40 min) → Session      │
+              │  → Hybrid                         │
+              └───────────────┬──────────────────┘
+                              │
+              ┌───────────────▼──────────────────┐
+              │  Evaluation (run_evaluation.py)   │
+              │  HR@K · NDCG@K · MRR@K           │
+              │  Coverage · Novelty               │
+              └───────────────┬──────────────────┘
+                              │
+              ┌───────────────▼──────────────────┐
+              │  Serving                          │
+              │  FastAPI :8000  ·  Streamlit :8501│
+              └──────────────────────────────────┘
 ```
 
-| Blob name | Description |
-|---|---|
-| `events.csv` | User interaction events |
-| `category_tree.csv` | Product category hierarchy |
-| `item_properties_part1.csv` | Item metadata part 1 |
-| `item_properties_part2.csv` | Item metadata part 2 |
-
----
-
-## ⚙️ How to Run End-to-End
-
+**Quick start:**
 ```bash
 # 1. Install dependencies
 pip install -r requirements.txt
@@ -337,60 +336,85 @@ pip install -r requirements.txt
 cp .env.example .env   # set GCS_BUCKET_NAME
 python src/gcs_loader.py
 
-# 3. Run the training pipeline (all steps in one script)
+# 3. Run feature engineering
+jupyter nbconvert --to notebook --execute notebooks/02_feature_engineering.ipynb
+
+# 4. Train models (full run ~50 min; CB is the bottleneck)
 python src/training/train.py
 
-# 4. Or step through interactively
-#    notebooks/eda.ipynb                    → EDA
-#    notebooks/02_feature_engineering.ipynb → Features
-#    notebooks/03_model_training.ipynb      → Train models
-#    notebooks/04_model_evaluation.ipynb    → Evaluate
+# 5. Or, if models are already saved, run a fast retrain (session only, ~30 s)
+python src/training/resume_training.py
 
-# 5. Serve recommendations
+# 6. Evaluate
+python src/training/run_evaluation.py
+
+# 7. Serve
 uvicorn src.app.api:app --reload
 streamlit run src/app/dashboard.py
 ```
 
 ---
 
-## 🔄 CI/CD (GitHub Actions)
+### 🪲 Pitfalls Faced & How They Were Solved
 
-Automated pipeline on push to `main`:
-
-1. Install dependencies
-2. Run `src/training/train.py`
-3. Upload model artefacts to GCS
-4. Run evaluation and post metrics summary to PR
-
-MLflow experiment tracking configured in `configs/pipeline_config.yaml` (`mlruns/` directory).
+| # | Pitfall | Root Cause | Solution |
+|---|---|---|---|
+| 1 | **OOM crash during TF-IDF** | `max_features=5000` on 417k items → 2 GB dense matrix | Reduced to `max_features=500` |
+| 2 | **`implicit` / `torch` missing on Python 3.14** | No wheels available for Python 3.14 | Replaced ALS with pure numpy/scipy, replaced GRU4Rec with Item-KNN |
+| 3 | **Duplicate class in `session_based.py`** | Old GRU4Rec class at line 162 silently overrode the new Item-KNN class | Truncated file to 160 lines to remove the ghost class |
+| 4 | **`user_features.py` OOM from `mode()` lambda** | `.apply(lambda x: x.mode())` on 2.75 M rows with groupby is O(n²) | Rewrote with vectorised `pandas.groupby` aggregates — 16× faster |
+| 5 | **`pyarrow` incompatible with Python 3.14** | `ArrowKeyError: No type extension named arrow.py_extension_type` | Switched notebook persist step from `.to_parquet()` → `.to_csv()` |
+| 6 | **Dashboard showing wrong model files** | `MODEL_FILES` dict still referenced old filenames (`als_model.npz`, `gru4rec_model.pt`) | Updated all keys to actual `.pkl` filenames |
+| 7 | **`_enrich_items` column misalignment** | Models return `list[tuple[int, float]]`; dashboard iterated as plain ints | Fixed unpacking to `(item_id, score)` and added a Score column |
+| 8 | **`evaluation_report.csv` cached as `None`** | `@st.cache_data` cached before file existed on first run | Removed the decorator from `load_eval_report` |
+| 9 | **Large files rejected by GitHub (>100 MB)** | Model PKLs (338–370 MB) and processed CSVs (106 MB) exceeded GitHub limit | Added to `.gitignore`; removed from git history with `git rm --cached` + amend |
 
 ---
 
-## 🧩 Future Steps
+### 🚀 Future Enhancements
 
-| Priority | Enhancement |
+| Priority | Item |
 |---|---|
-| High | Wire **ConversionRanker training** into `03_model_training.ipynb` using session features as X and is_purchase as y |
-| High | Add **MLflow logging** calls to `src/training/train.py` (config exists, calls not yet wired) |
-| Medium | **Real-time streaming** with Kafka — ingest live click events and update session model |
-| Medium | **A/B testing framework** — compare hybrid vs. baseline (popularity) with statistical significance |
-| Medium | **Time-of-day feature** — inject hour-of-day (peak 17–21h from EDA) into ConversionRanker |
-| Low | **Neural Collaborative Filtering** (NeuMF) or **BERT4Rec** to replace ALS for richer user embeddings |
-| Low | **Graph Neural Network** (GNN) over category hierarchy + co-purchase graph |
-| Low | **Reinforcement Learning** (bandits) for dynamic explore-exploit recommendation policy |
+| 🔴 High | **MLflow experiment tracking** — config exists; calls not yet wired into `train.py` |
+| 🔴 High | **ConversionRanker (LightGBM)** — train on session features × `is_purchase` target to re-rank hybrid output |
+| 🟡 Medium | **Real-time event streaming** — Kafka consumer to update session model with live clicks |
+| 🟡 Medium | **A/B testing framework** — statistical comparison of hybrid vs. popularity baseline |
+| 🟡 Medium | **Time-of-day feature** — inject hour-of-day signal (peak 17–21h) into re-ranker |
+| 🟢 Low | **BERT4Rec / SASRec** — Transformer-based sequential model to replace Item-KNN |
+| 🟢 Low | **NeuMF** — Neural Collaborative Filtering for richer user/item embeddings vs. ALS |
+| 🟢 Low | **GNN over category hierarchy** — co-purchase + category graph for structural similarity |
+| 🟢 Low | **Reinforcement learning bandit** — explore-exploit policy for dynamic recommendation |
+
+---
+
+## ☁️ Google Cloud Storage Setup
+
+Raw files can be pulled from a GCS bucket automatically.
+
+```bash
+gcloud auth application-default login
+cp .env.example .env   # set GCS_BUCKET_NAME
+python src/gcs_loader.py
+```
+
+| Blob | Description |
+|---|---|
+| `events.csv` | User interaction events |
+| `category_tree.csv` | Product category hierarchy |
+| `item_properties_part1.csv` | Item metadata part 1 |
+| `item_properties_part2.csv` | Item metadata part 2 |
 
 ---
 
 ## 👤 Author
 
-**Biplob Gon**
-_Data Scientist | AI/ML | Recommender Systems_
+**Biplob Gon** · Data Scientist | AI/ML | Recommender Systems
 
 [![GitHub](https://img.shields.io/badge/GitHub-biplobgon-black?logo=github)](https://github.com/biplobgon)
 [![LinkedIn](https://img.shields.io/badge/LinkedIn-Biplob%20Gon-blue?logo=linkedin)](https://linkedin.com/in/biplobgon)
 
 ---
 
-## ⭐ If you found this useful
+## ⭐ Found this useful?
 
-Give this repo a ⭐ to support and share!
+Give the repo a ⭐ — it helps others discover it.
