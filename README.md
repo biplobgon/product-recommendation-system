@@ -1,4 +1,16 @@
-﻿# 🛍️ Product Recommendation System
+﻿---
+title: Product Recommendation System
+emoji: 🛍️
+colorFrom: blue
+colorTo: purple
+sdk: streamlit
+sdk_version: "1.32.0"
+app_file: app.py
+pinned: true
+license: mit
+---
+
+# 🛍️ Product Recommendation System
 
 ![Python](https://img.shields.io/badge/Python-3.14-blue)
 ![Recommender](https://img.shields.io/badge/System-Hybrid_Recommendation-green)

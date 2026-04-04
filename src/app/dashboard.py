@@ -40,6 +40,15 @@ REPORTS_DIR = ROOT / "outputs" / "reports"
 DATA_DIR    = ROOT / "data" / "processed"
 EVAL_CSV    = REPORTS_DIR / "evaluation_report.csv"
 
+# ---------------------------------------------------------------------------
+# HUGGING FACE ARTEFACT DOWNLOAD (no-op when files already exist locally)
+# ---------------------------------------------------------------------------
+try:
+    from app.hf_loader import ensure_all as _hf_ensure_all
+    _hf_ensure_all()
+except ImportError:
+    pass  # hf_loader not available in some environments
+
 MODEL_FILES = {
     "Hybrid (All Models)": {
         "meta":  MODELS_DIR / "hybrid_model.pkl",
