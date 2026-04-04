@@ -451,54 +451,6 @@ streamlit run src/app/dashboard.py
 | 🟢 Low | **GNN over category hierarchy** — co-purchase + category graph for structural similarity |
 | 🟢 Low | **Reinforcement learning bandit** — explore-exploit policy for dynamic recommendation |
 
----
-
-## 🚀 Try the Live App
-
-<div align="center">
-
-### [![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://recomsys.streamlit.app/)
-
-**[https://recomsys.streamlit.app/](https://recomsys.streamlit.app/)**
-
-*Get real-time product recommendations · Compare 4 ML models · Explore the dataset*
-
-</div>
-
----
-
-<!--═══════════════════════════════════════════════════════════╗
-    PART 1 — PRODUCT LINKS
-╚══════════════════════════════════════════════════════════════-->
-
-## 🔗 Product Links
-
-| Surface | Link | Notes |
-|---|---|---|
-| 🌐 **Live Streamlit App** | [recomsys.streamlit.app](https://recomsys.streamlit.app/) | **Deployed** — interactive recommendations, model metrics & data explorer |
-| **FastAPI Service** | [http://localhost:8000](http://localhost:8000) | REST endpoints — `/recommend/{visitor_id}`, `/similar/{item_id}`, `/popular` |
-| **FastAPI Docs (Swagger)** | [http://localhost:8000/docs](http://localhost:8000/docs) | Auto-generated OpenAPI spec |
-
-> **Run locally:**
-> ```bash
-> uvicorn src.app.api:app --host 0.0.0.0 --port 8000 --reload
-> streamlit run src/app/dashboard.py --server.port 8501
-> ```
-
----
-
-<!--═══════════════════════════════════════════════════════════╗
-    PART 2 — EXECUTIVE SUMMARY
-╚══════════════════════════════════════════════════════════════-->
-
-## 📌 Overview
-
-End-to-end **Product Recommendation System** built on the real-world **RetailRocket e-commerce dataset** (~2.75 M user interaction events). The project covers the full ML lifecycle — EDA → feature engineering → model training → offline evaluation → REST API + interactive dashboard — using a **4-model hybrid architecture** that handles both cold-start and warm-start users.
-
-> **Core prediction goal**: _Given a visitor's browsing session and historical interactions, predict the next N products they are most likely to purchase._
-
----
-
 ## 🎯 Executive Summary
 
 ### The Problem
